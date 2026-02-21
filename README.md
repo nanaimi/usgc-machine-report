@@ -82,5 +82,11 @@ For live frequency/utilization from `powermetrics`, run with root privileges (or
 sudo MACHINE_REPORT_HIGH_FIDELITY=1 ~/.machine_report.sh
 ```
 
+Speed tuning (default is fast):
+
+```bash
+MACHINE_REPORT_HIGH_FIDELITY=1 MACHINE_REPORT_HIGH_FIDELITY_INTERVAL_MS=200 ~/.machine_report.sh
+```
+
 # License
 BSD 3 Clause License, Copyright © 2024, U.S. Graphics, LLC. See [`LICENSE`](https://github.com/usgraphics/machine-report-staging/blob/master/LICENSE) file for license information.

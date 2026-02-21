@@ -14,6 +14,7 @@ BORDERS_AND_PADDING=7
 # Basic configuration, change as needed
 report_title="UNITED STATES GRAPHICS COMPANY"
 machine_report_high_fidelity="${MACHINE_REPORT_HIGH_FIDELITY:-0}"
+machine_report_high_fidelity_interval_ms="${MACHINE_REPORT_HIGH_FIDELITY_INTERVAL_MS:-200}"
 last_login_ip_present=0
 zfs_present=0
 zfs_filesystem="zroot/ROOT/os"
@@ -545,6 +546,7 @@ collect_macos_high_fidelity_data() {
     local cpu_nominal_pct=""
     local gpu_active=""
     local gpu_freq_mhz=""
+    local sample_interval_ms="$machine_report_high_fidelity_interval_ms"
 
     if [ "$machine_report_high_fidelity" != "1" ]; then
         return
@@ -552,11 +554,14 @@ collect_macos_high_fidelity_data() {
     if ! command -v powermetrics >/dev/null 2>&1; then
         return
     fi
+    if ! [[ "$sample_interval_ms" =~ ^[0-9]+$ ]] || [ "$sample_interval_ms" -lt 50 ]; then
+        sample_interval_ms=200
+    fi
 
     if [ "$EUID" -eq 0 ]; then
-        pm_output=$(powermetrics --samplers cpu_power,gpu_power -n 1 2>/dev/null || true)
+        pm_output=$(powermetrics --samplers cpu_power,gpu_power -n 1 -i "$sample_interval_ms" 2>/dev/null || true)
     elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-        pm_output=$(sudo -n powermetrics --samplers cpu_power,gpu_power -n 1 2>/dev/null || true)
+        pm_output=$(sudo -n powermetrics --samplers cpu_power,gpu_power -n 1 -i "$sample_interval_ms" 2>/dev/null || true)
     else
         if [ "$cpu_freq" = "N/A (Apple Silicon)" ]; then
             cpu_freq="N/A (sudo)"
