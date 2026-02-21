@@ -16,7 +16,11 @@ report_title="UNITED STATES GRAPHICS COMPANY"
 last_login_ip_present=0
 zfs_present=0
 zfs_filesystem="zroot/ROOT/os"
+gpu_model="-"
 gpu_cores="-"
+gpu_api="-"
+gpu_memory="-"
+gpu_util="-"
 
 # Utilities
 max_length() {
@@ -50,8 +54,12 @@ set_current_len() {
         "$cpu_model"                                             \
         "$cpu_cores_per_socket vCPU(s) / $cpu_sockets Socket(s)" \
         "$cpu_hypervisor"                                        \
-        "$cpu_freq GHz"                                          \
+        "$cpu_freq"                                              \
+        "$gpu_model"                                             \
         "$gpu_cores"                                             \
+        "$gpu_api"                                               \
+        "$gpu_memory"                                            \
+        "$gpu_util"                                              \
         "$cpu_1min_bar_graph"                                    \
         "$cpu_5min_bar_graph"                                    \
         "$cpu_15min_bar_graph"                                   \
@@ -307,17 +315,48 @@ collect_linux_data() {
     if [ -z "$cpu_cores_per_socket" ]; then cpu_cores_per_socket="$cpu_cores"; fi
     if [ -z "$cpu_sockets" ]; then cpu_sockets="1"; fi
 
-    if [ -f /proc/cpuinfo ]; then
-        cpu_freq="$(awk -F: '/cpu MHz/ {printf "%.2f", $2/1000; exit}' /proc/cpuinfo)"
-    fi
-    if [ -z "$cpu_freq" ]; then cpu_freq="-"; fi
-    gpu_cores="-"
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        gpu_sms=$(nvidia-smi --query-gpu=multiprocessor_count --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
-        if [ -n "$gpu_sms" ]; then
-            gpu_cores="${gpu_sms} (SM)"
+    cpu_freq_mhz=""
+    if command -v lscpu >/dev/null 2>&1; then
+        cpu_freq_mhz="$(lscpu | awk -F: '/CPU max MHz/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')"
+        if [ -z "$cpu_freq_mhz" ]; then
+            cpu_freq_mhz="$(lscpu | awk -F: '/CPU MHz/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')"
         fi
     fi
+    if [ -z "$cpu_freq_mhz" ] && [ -f /proc/cpuinfo ]; then
+        cpu_freq_mhz="$(awk -F: '/cpu MHz/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo)"
+    fi
+    if [ -n "$cpu_freq_mhz" ]; then
+        cpu_freq="$(awk -v mhz="$cpu_freq_mhz" 'BEGIN { printf "%.2f GHz", mhz / 1000 }')"
+    else
+        cpu_freq="-"
+    fi
+
+    gpu_model="-"
+    gpu_cores="-"
+    gpu_api="-"
+    gpu_memory="-"
+    gpu_util="-"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        gpu_model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+        gpu_sms=$(nvidia-smi --query-gpu=multiprocessor_count --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+        gpu_mem_line=$(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
+        gpu_util_val=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+        gpu_driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+
+        if [ -n "$gpu_sms" ]; then gpu_cores="${gpu_sms} (SM)"; fi
+        if [ -n "$gpu_mem_line" ]; then
+            gpu_memory=$(echo "$gpu_mem_line" | awk -F, '{gsub(/^[ \t]+|[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2); printf "%s/%s MiB", $1, $2}')
+        fi
+        if [ -n "$gpu_util_val" ]; then gpu_util="${gpu_util_val}%"; fi
+        if [ -n "$gpu_driver" ]; then gpu_api="NVIDIA ${gpu_driver}"; fi
+    elif command -v lspci >/dev/null 2>&1; then
+        gpu_model=$(lspci | awk -F': ' '/VGA compatible controller|3D controller|Display controller/ {print $2; exit}')
+    fi
+    if [ -z "$gpu_model" ]; then gpu_model="-"; fi
+    if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
+    if [ -z "$gpu_api" ]; then gpu_api="-"; fi
+    if [ -z "$gpu_memory" ]; then gpu_memory="-"; fi
+    if [ -z "$gpu_util" ]; then gpu_util="-"; fi
 
     load_values=$(uptime | awk -F'load average: ' 'NF>1 {gsub(/,/, "", $2); print $2}')
     if [ -z "$load_values" ]; then
@@ -408,12 +447,25 @@ collect_macos_data() {
         cpu_freq_hz=$(sysctl -n hw.cpufrequency_max 2>/dev/null)
     fi
     if [ -n "$cpu_freq_hz" ] && [ "$cpu_freq_hz" != "0" ]; then
-        cpu_freq=$(awk -v hz="$cpu_freq_hz" 'BEGIN { printf "%.2f", hz / 1000000000 }')
+        cpu_freq=$(awk -v hz="$cpu_freq_hz" 'BEGIN { printf "%.2f GHz", hz / 1000000000 }')
     else
-        cpu_freq="-"
+        cpu_freq=$(echo "$cpu_model" | awk 'match($0, /[0-9.]+ ?GHz/) {print substr($0, RSTART, RLENGTH)}')
+        if [ -z "$cpu_freq" ]; then
+            cpu_freq="N/A (Apple Silicon)"
+        fi
     fi
-    gpu_cores=$(system_profiler SPDisplaysDataType 2>/dev/null | awk -F': ' '/Total Number of Cores/ {print $2; exit}')
+
+    gpu_profile="$(system_profiler SPDisplaysDataType 2>/dev/null)"
+    gpu_model=$(echo "$gpu_profile" | awk -F': ' '/Chipset Model/ {print $2; exit}')
+    gpu_cores=$(echo "$gpu_profile" | awk -F': ' '/Total Number of Cores/ {print $2; exit}')
+    gpu_api=$(echo "$gpu_profile" | awk -F': ' '/Metal Support/ {print $2; exit}')
+    gpu_memory=$(echo "$gpu_profile" | awk -F': ' '/VRAM \(Total\)|VRAM \(Dynamic, Max\)|VRAM/ {print $2; exit}')
+    gpu_util="-"
+
+    if [ -z "$gpu_model" ]; then gpu_model="Apple GPU"; fi
     if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
+    if [ -z "$gpu_api" ]; then gpu_api="Metal"; fi
+    if [ -z "$gpu_memory" ]; then gpu_memory="Unified"; fi
 
     load_values=$(sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, "", $0); print $1, $2, $3}')
     load_avg_1min=$(echo "$load_values" | awk '{print $1}')
@@ -516,14 +568,19 @@ done
 
 PRINT_DATA "USER" "$net_current_user"
 PRINT_DIVIDER
-PRINT_DATA "PROCESSOR" "$cpu_model"
-PRINT_DATA "CORES" "$cpu_cores_per_socket vCPU(s) / $cpu_sockets Socket(s)"
+PRINT_DATA "CPU MODEL" "$cpu_model"
+PRINT_DATA "CPU CORES" "$cpu_cores_per_socket vCPU(s) / $cpu_sockets Socket(s)"
 PRINT_DATA "HYPERVISOR" "$cpu_hypervisor"
-PRINT_DATA "CPU FREQ" "$cpu_freq GHz"
-PRINT_DATA "GPU CORES" "$gpu_cores"
+PRINT_DATA "CPU FREQ" "$cpu_freq"
 PRINT_DATA "LOAD  1m" "$cpu_1min_bar_graph"
 PRINT_DATA "LOAD  5m" "$cpu_5min_bar_graph"
 PRINT_DATA "LOAD 15m" "$cpu_15min_bar_graph"
+PRINT_DIVIDER
+PRINT_DATA "GPU MODEL" "$gpu_model"
+PRINT_DATA "GPU CORES" "$gpu_cores"
+PRINT_DATA "GPU API" "$gpu_api"
+PRINT_DATA "GPU MEMORY" "$gpu_memory"
+PRINT_DATA "GPU UTIL" "$gpu_util"
 
 if [ $zfs_present -eq 1 ]; then
     PRINT_DIVIDER

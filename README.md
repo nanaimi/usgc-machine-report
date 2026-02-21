@@ -14,7 +14,8 @@ This fork adds first-class macOS support while preserving Linux behavior.
 
 - Runs on macOS without requiring `/proc`, `lastlog`, `lscpu`, or `nproc`
 - Uses `sw_vers`, `sysctl`, `vm_stat`, and `df` for Darwin-native metrics
-- Shows GPU core count on macOS (`system_profiler SPDisplaysDataType`)
+- Splits CPU and GPU into separate report sections
+- Shows GPU stats on macOS (`system_profiler SPDisplaysDataType`): model, cores, Metal support, memory
 - Keeps the same TR-100 table layout
 
 ‼️*** WARNING ***‼️
