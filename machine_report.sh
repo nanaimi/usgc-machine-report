@@ -16,6 +16,7 @@ report_title="UNITED STATES GRAPHICS COMPANY"
 last_login_ip_present=0
 zfs_present=0
 zfs_filesystem="zroot/ROOT/os"
+gpu_cores="-"
 
 # Utilities
 max_length() {
@@ -50,6 +51,7 @@ set_current_len() {
         "$cpu_cores_per_socket vCPU(s) / $cpu_sockets Socket(s)" \
         "$cpu_hypervisor"                                        \
         "$cpu_freq GHz"                                          \
+        "$gpu_cores"                                             \
         "$cpu_1min_bar_graph"                                    \
         "$cpu_5min_bar_graph"                                    \
         "$cpu_15min_bar_graph"                                   \
@@ -309,6 +311,13 @@ collect_linux_data() {
         cpu_freq="$(awk -F: '/cpu MHz/ {printf "%.2f", $2/1000; exit}' /proc/cpuinfo)"
     fi
     if [ -z "$cpu_freq" ]; then cpu_freq="-"; fi
+    gpu_cores="-"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        gpu_sms=$(nvidia-smi --query-gpu=multiprocessor_count --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+        if [ -n "$gpu_sms" ]; then
+            gpu_cores="${gpu_sms} (SM)"
+        fi
+    fi
 
     load_values=$(uptime | awk -F'load average: ' 'NF>1 {gsub(/,/, "", $2); print $2}')
     if [ -z "$load_values" ]; then
@@ -403,6 +412,8 @@ collect_macos_data() {
     else
         cpu_freq="-"
     fi
+    gpu_cores=$(system_profiler SPDisplaysDataType 2>/dev/null | awk -F': ' '/Total Number of Cores/ {print $2; exit}')
+    if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
 
     load_values=$(sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, "", $0); print $1, $2, $3}')
     load_avg_1min=$(echo "$load_values" | awk '{print $1}')
@@ -509,6 +520,7 @@ PRINT_DATA "PROCESSOR" "$cpu_model"
 PRINT_DATA "CORES" "$cpu_cores_per_socket vCPU(s) / $cpu_sockets Socket(s)"
 PRINT_DATA "HYPERVISOR" "$cpu_hypervisor"
 PRINT_DATA "CPU FREQ" "$cpu_freq GHz"
+PRINT_DATA "GPU CORES" "$gpu_cores"
 PRINT_DATA "LOAD  1m" "$cpu_1min_bar_graph"
 PRINT_DATA "LOAD  5m" "$cpu_5min_bar_graph"
 PRINT_DATA "LOAD 15m" "$cpu_15min_bar_graph"
