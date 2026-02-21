@@ -588,21 +588,34 @@ collect_macos_high_fidelity_data() {
         cpu_freq="${cpu_nominal_pct}% nominal"
     fi
 
-    gpu_active=$(echo "$pm_output" | awk -F': ' '/GPU HW active residency|GPU active residency|GPU duty cycle/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+    gpu_active=$(echo "$pm_output" | awk -F': ' '/GPU HW active residency|GPU active residency|GPU duty cycle/ {gsub(/^[ \t]+/, "", $2); print $2}')
     if [ -n "$gpu_active" ]; then
-        gpu_active_pct=$(echo "$gpu_active" | awk 'match($0, /[0-9]+([.][0-9]+)?%/) {print substr($0, RSTART, RLENGTH-1); exit}')
+        gpu_active_pct=$(echo "$gpu_active" | awk '
+            {
+                line=$0
+                while (match(line, /[0-9]+([.][0-9]+)?%/)) {
+                    pct=substr(line, RSTART, RLENGTH-1) + 0
+                    if (pct >= 0 && pct <= 100) {
+                        printf "%.2f", pct
+                        exit
+                    }
+                    line=substr(line, RSTART + RLENGTH)
+                }
+            }')
         if [ -n "$gpu_active_pct" ]; then
             gpu_util="${gpu_active_pct}%"
         else
-            gpu_util="-"
+            gpu_util="N/A"
         fi
     fi
 
     gpu_freq_mhz=$(echo "$pm_output" | awk '
         /GPU/ && /MHz/ {
             line=$0
-            while (match(line, /[0-9]+([.][0-9]+)?/)) {
-                val=substr(line, RSTART, RLENGTH)+0
+            while (match(line, /[0-9]+([.][0-9]+)?[[:space:]]*MHz/)) {
+                token=substr(line, RSTART, RLENGTH)
+                gsub(/[^0-9.]/, "", token)
+                val=token + 0
                 if (val > 0) { print val; exit }
                 line=substr(line, RSTART + RLENGTH)
             }
