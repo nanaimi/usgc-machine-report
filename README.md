@@ -8,9 +8,17 @@ A machine information report used at [United States Graphics Company](https://x.
 
 <img src="https://github.com/usgraphics/TR-100/assets/8161031/2a8412dd-09de-45ff-8dfb-e5c6b6f19212" width="500" />
 
+## This fork
+
+This fork adds first-class macOS support while preserving Linux behavior.
+
+- Runs on macOS without requiring `/proc`, `lastlog`, `lscpu`, or `nproc`
+- Uses `sw_vers`, `sysctl`, `vm_stat`, and `df` for Darwin-native metrics
+- Keeps the same TR-100 table layout
+
 ‼️*** WARNING ***‼️
 
-Alpha release, only compatible with Debian systems with ZFS root partition running as `root` user. This is not ready for public use *at all*. But you should totally try to use it. The worst that's going to happen is it'll destroy your system. Your help is appreciated in making this project production worthy.
+Original upstream assumptions are Debian-first and internal-use focused. This fork aims to be practical on macOS and Linux, but output details still depend on host tooling.
 
 # Software Philosophy
 Since it is a bash script, you've got the source code. Just modify that for your needs. No need for any abstractions, directly edit the code. No modules, no DSL, no config files, none of it. Single file for easy deployment. Only abstraction that's acceptable is variables at the top of the script to customize the system, but it should stay minimal. 
@@ -29,17 +37,19 @@ Another consideration is to avoid abstracting the source code at the expense of 
 Tabular, short, clear and concise. The tool's job is to inform the user of the current state of the system they are logging in or are operating. No emojis (except for the one used as a warning sign). No colors (as default, might add an option to add colors).
 
 # Assumed Setup
-This script is designed for us, for our internal use.
+This script was designed for upstream internal use.
 
-- AMD EPYC CPU
-- Debian OS
-- ZFS installed on root partition
-- VMWare Hypervisor
+- AMD EPYC CPU (upstream assumption)
+- Debian OS (upstream assumption)
+- ZFS installed on root partition (upstream assumption)
+- VMWare Hypervisor (upstream assumption)
+- macOS (supported by this fork)
 
 # Dependencies
-- `lscpu`
+- Linux mode: common utilities such as `awk`, `df`, `uptime`, optional `lscpu`/`nproc`
+- macOS mode: built-ins like `sw_vers`, `sysctl`, `vm_stat`, `df`
 
-If your system is different, things might break. Look up the offending line and you can try to fix it for your specific system.
+If your system is different, you can still edit the script directly to adapt fields.
 
 # Installation
 
