@@ -16,6 +16,7 @@ This fork adds first-class macOS support while preserving Linux behavior.
 - Uses `sw_vers`, `sysctl`, `vm_stat`, and `df` for Darwin-native metrics
 - Splits CPU and GPU into separate report sections
 - Shows GPU stats on macOS (`system_profiler SPDisplaysDataType`): model, cores, Metal support, memory
+- Supports optional high-fidelity macOS sampling via `powermetrics` (`MACHINE_REPORT_HIGH_FIDELITY=1`)
 - Keeps the same TR-100 table layout
 
 ‼️*** WARNING ***‼️
@@ -67,6 +68,18 @@ Copy `machine_report.sh` from this repository and add it to `~/.machine_report.s
 if [[ $- == *i* ]]; then
     ~/.machine_report.sh
 fi
+```
+
+Optional high-fidelity mode on macOS:
+
+```bash
+MACHINE_REPORT_HIGH_FIDELITY=1 ~/.machine_report.sh
+```
+
+For live frequency/utilization from `powermetrics`, run with root privileges (or configure non-interactive sudo):
+
+```bash
+sudo MACHINE_REPORT_HIGH_FIDELITY=1 ~/.machine_report.sh
 ```
 
 # License

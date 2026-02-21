@@ -13,6 +13,7 @@ BORDERS_AND_PADDING=7
 
 # Basic configuration, change as needed
 report_title="UNITED STATES GRAPHICS COMPANY"
+machine_report_high_fidelity="${MACHINE_REPORT_HIGH_FIDELITY:-0}"
 last_login_ip_present=0
 zfs_present=0
 zfs_filesystem="zroot/ROOT/os"
@@ -20,6 +21,7 @@ gpu_model="-"
 gpu_cores="-"
 gpu_api="-"
 gpu_memory="-"
+gpu_freq="-"
 gpu_util="-"
 
 # Utilities
@@ -59,6 +61,7 @@ set_current_len() {
         "$gpu_cores"                                             \
         "$gpu_api"                                               \
         "$gpu_memory"                                            \
+        "$gpu_freq"                                              \
         "$gpu_util"                                              \
         "$cpu_1min_bar_graph"                                    \
         "$cpu_5min_bar_graph"                                    \
@@ -335,12 +338,14 @@ collect_linux_data() {
     gpu_cores="-"
     gpu_api="-"
     gpu_memory="-"
+    gpu_freq="-"
     gpu_util="-"
     if command -v nvidia-smi >/dev/null 2>&1; then
         gpu_model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
         gpu_sms=$(nvidia-smi --query-gpu=multiprocessor_count --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
         gpu_mem_line=$(nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1)
         gpu_util_val=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
+        gpu_clock_mhz=$(nvidia-smi --query-gpu=clocks.current.graphics --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
         gpu_driver=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
 
         if [ -n "$gpu_sms" ]; then gpu_cores="${gpu_sms} (SM)"; fi
@@ -348,6 +353,9 @@ collect_linux_data() {
             gpu_memory=$(echo "$gpu_mem_line" | awk -F, '{gsub(/^[ \t]+|[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2); printf "%s/%s MiB", $1, $2}')
         fi
         if [ -n "$gpu_util_val" ]; then gpu_util="${gpu_util_val}%"; fi
+        if [ -n "$gpu_clock_mhz" ]; then
+            gpu_freq=$(awk -v mhz="$gpu_clock_mhz" 'BEGIN { printf "%.2f GHz", mhz / 1000 }')
+        fi
         if [ -n "$gpu_driver" ]; then gpu_api="NVIDIA ${gpu_driver}"; fi
     elif command -v lspci >/dev/null 2>&1; then
         gpu_model=$(lspci | awk -F': ' '/VGA compatible controller|3D controller|Display controller/ {print $2; exit}')
@@ -356,6 +364,7 @@ collect_linux_data() {
     if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
     if [ -z "$gpu_api" ]; then gpu_api="-"; fi
     if [ -z "$gpu_memory" ]; then gpu_memory="-"; fi
+    if [ -z "$gpu_freq" ]; then gpu_freq="-"; fi
     if [ -z "$gpu_util" ]; then gpu_util="-"; fi
 
     load_values=$(uptime | awk -F'load average: ' 'NF>1 {gsub(/,/, "", $2); print $2}')
@@ -460,12 +469,15 @@ collect_macos_data() {
     gpu_cores=$(echo "$gpu_profile" | awk -F': ' '/Total Number of Cores/ {print $2; exit}')
     gpu_api=$(echo "$gpu_profile" | awk -F': ' '/Metal Support/ {print $2; exit}')
     gpu_memory=$(echo "$gpu_profile" | awk -F': ' '/VRAM \(Total\)|VRAM \(Dynamic, Max\)|VRAM/ {print $2; exit}')
+    gpu_freq="-"
     gpu_util="-"
 
     if [ -z "$gpu_model" ]; then gpu_model="Apple GPU"; fi
     if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
     if [ -z "$gpu_api" ]; then gpu_api="Metal"; fi
     if [ -z "$gpu_memory" ]; then gpu_memory="Unified"; fi
+
+    collect_macos_high_fidelity_data
 
     load_values=$(sysctl -n vm.loadavg 2>/dev/null | awk '{gsub(/[{}]/, "", $0); print $1, $2, $3}')
     load_avg_1min=$(echo "$load_values" | awk '{print $1}')
@@ -527,6 +539,63 @@ collect_macos_data() {
     fi
 }
 
+collect_macos_high_fidelity_data() {
+    local pm_output=""
+    local cpu_avg_mhz=""
+    local cpu_nominal_pct=""
+    local gpu_active=""
+    local gpu_freq_mhz=""
+
+    if [ "$machine_report_high_fidelity" != "1" ]; then
+        return
+    fi
+    if ! command -v powermetrics >/dev/null 2>&1; then
+        return
+    fi
+
+    if [ "$EUID" -eq 0 ]; then
+        pm_output=$(powermetrics --samplers cpu_power,gpu_power -n 1 2>/dev/null || true)
+    elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+        pm_output=$(sudo -n powermetrics --samplers cpu_power,gpu_power -n 1 2>/dev/null || true)
+    else
+        if [ "$cpu_freq" = "N/A (Apple Silicon)" ]; then
+            cpu_freq="N/A (sudo)"
+        fi
+        if [ "$gpu_freq" = "-" ]; then
+            gpu_freq="N/A (sudo)"
+        fi
+        if [ "$gpu_util" = "-" ]; then
+            gpu_util="N/A (sudo)"
+        fi
+        return
+    fi
+
+    if [ -z "$pm_output" ]; then
+        return
+    fi
+
+    cpu_avg_mhz=$(echo "$pm_output" | awk -F': ' '/CPU Average frequency/ && $2 ~ /MHz/ {gsub(/[^0-9.]/, "", $2); print $2; exit}')
+    cpu_nominal_pct=$(echo "$pm_output" | awk -F': ' '/CPU Average frequency as fraction of nominal/ {gsub(/[^0-9.]/, "", $2); print $2; exit}')
+    if [ -n "$cpu_avg_mhz" ]; then
+        cpu_freq=$(awk -v mhz="$cpu_avg_mhz" 'BEGIN { printf "%.2f GHz (live)", mhz / 1000 }')
+    elif [ -n "$cpu_nominal_pct" ]; then
+        cpu_freq="${cpu_nominal_pct}% nominal"
+    fi
+
+    gpu_active=$(echo "$pm_output" | awk -F': ' '/GPU HW active residency|GPU active residency|GPU duty cycle/ {gsub(/^[ \t]+/, "", $2); print $2; exit}')
+    if [ -n "$gpu_active" ]; then
+        case "$gpu_active" in
+            *%) gpu_util="$gpu_active" ;;
+            *) gpu_util="${gpu_active}%" ;;
+        esac
+    fi
+
+    gpu_freq_mhz=$(echo "$pm_output" | awk -F': ' '/GPU .*frequency/ && $2 ~ /MHz/ {gsub(/[^0-9.]/, "", $2); print $2; exit}')
+    if [ -n "$gpu_freq_mhz" ]; then
+        gpu_freq=$(awk -v mhz="$gpu_freq_mhz" 'BEGIN { printf "%.2f GHz", mhz / 1000 }')
+    fi
+}
+
 OS_TYPE=$(uname -s)
 if [ "$OS_TYPE" = "Darwin" ]; then
     collect_macos_data
@@ -580,6 +649,7 @@ PRINT_DATA "GPU MODEL" "$gpu_model"
 PRINT_DATA "GPU CORES" "$gpu_cores"
 PRINT_DATA "GPU API" "$gpu_api"
 PRINT_DATA "GPU MEMORY" "$gpu_memory"
+PRINT_DATA "GPU FREQ" "$gpu_freq"
 PRINT_DATA "GPU UTIL" "$gpu_util"
 
 if [ $zfs_present -eq 1 ]; then
