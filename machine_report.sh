@@ -24,6 +24,8 @@ gpu_api="-"
 gpu_memory="-"
 gpu_freq="-"
 gpu_util="-"
+gpu_util_pct=""
+gpu_load_bar="-"
 
 # Utilities
 max_length() {
@@ -64,6 +66,7 @@ set_current_len() {
         "$gpu_memory"                                            \
         "$gpu_freq"                                              \
         "$gpu_util"                                              \
+        "$gpu_load_bar"                                          \
         "$cpu_1min_bar_graph"                                    \
         "$cpu_5min_bar_graph"                                    \
         "$cpu_15min_bar_graph"                                   \
@@ -341,6 +344,7 @@ collect_linux_data() {
     gpu_memory="-"
     gpu_freq="-"
     gpu_util="-"
+    gpu_util_pct=""
     if command -v nvidia-smi >/dev/null 2>&1; then
         gpu_model=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
         gpu_sms=$(nvidia-smi --query-gpu=multiprocessor_count --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{$1=$1; print}')
@@ -353,7 +357,10 @@ collect_linux_data() {
         if [ -n "$gpu_mem_line" ]; then
             gpu_memory=$(echo "$gpu_mem_line" | awk -F, '{gsub(/^[ \t]+|[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2); printf "%s/%s MiB", $1, $2}')
         fi
-        if [ -n "$gpu_util_val" ]; then gpu_util="${gpu_util_val}%"; fi
+        if [ -n "$gpu_util_val" ]; then
+            gpu_util_pct=$(echo "$gpu_util_val" | awk '{print $1 + 0}')
+            gpu_util=$(awk -v pct="$gpu_util_pct" 'BEGIN { printf "%.2f%%", pct }')
+        fi
         if [ -n "$gpu_clock_mhz" ]; then
             gpu_freq=$(awk -v mhz="$gpu_clock_mhz" 'BEGIN { printf "%.2f GHz", mhz / 1000 }')
         fi
@@ -472,6 +479,7 @@ collect_macos_data() {
     gpu_memory=$(echo "$gpu_profile" | awk -F': ' '/VRAM \(Total\)|VRAM \(Dynamic, Max\)|VRAM/ {print $2; exit}')
     gpu_freq="-"
     gpu_util="-"
+    gpu_util_pct=""
 
     if [ -z "$gpu_model" ]; then gpu_model="Apple GPU"; fi
     if [ -z "$gpu_cores" ]; then gpu_cores="-"; fi
@@ -573,6 +581,7 @@ collect_macos_high_fidelity_data() {
         if [ "$gpu_util" = "-" ]; then
             gpu_util="N/A (sudo)"
         fi
+        gpu_util_pct=""
         return
     fi
 
@@ -604,8 +613,10 @@ collect_macos_high_fidelity_data() {
             }')
         if [ -n "$gpu_active_pct" ]; then
             gpu_util="${gpu_active_pct}%"
+            gpu_util_pct="$gpu_active_pct"
         else
             gpu_util="N/A"
+            gpu_util_pct=""
         fi
     fi
 
@@ -639,6 +650,12 @@ set_current_len
 cpu_1min_bar_graph=$(bar_graph "$load_avg_1min" "$cpu_cores")
 cpu_5min_bar_graph=$(bar_graph "$load_avg_5min" "$cpu_cores")
 cpu_15min_bar_graph=$(bar_graph "$load_avg_15min" "$cpu_cores")
+
+if [ -n "$gpu_util_pct" ]; then
+    gpu_load_bar=$(bar_graph "$gpu_util_pct" "100")
+else
+    gpu_load_bar="-"
+fi
 
 mem_bar_graph=$(bar_graph "$mem_used" "$mem_total")
 
@@ -680,6 +697,7 @@ PRINT_DATA "GPU API" "$gpu_api"
 PRINT_DATA "GPU MEMORY" "$gpu_memory"
 PRINT_DATA "GPU FREQ" "$gpu_freq"
 PRINT_DATA "GPU UTIL" "$gpu_util"
+PRINT_DATA "GPU LOAD" "$gpu_load_bar"
 
 if [ $zfs_present -eq 1 ]; then
     PRINT_DIVIDER
